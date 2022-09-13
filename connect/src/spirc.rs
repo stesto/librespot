@@ -1428,7 +1428,14 @@ impl SpircTask {
 
     fn set_volume(&mut self, volume: u16) {
         self.device.set_volume(volume as u32);
-        self.mixer.set_volume(volume);
+        self.mixer.set_volume(u16::MAX); //don't pass actual volume to mixer
+        ///////////////////////////////
+        let vol = (volume as f64 / 65535.0 * 255.0) as u8; // shrink to byte
+        let ip = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 55550);
+        if let Ok(mut stream) = TcpStream::connect_timeout(&ip, Duration::from_millis(750)) {
+            let _ = stream.write(&[vol]);
+        }
+        ///////////////////////////////
         if let Some(cache) = self.session.cache() {
             cache.save_volume(volume)
         }
