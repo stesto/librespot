@@ -31,6 +31,9 @@ impl VolumeGetter for NoOpVolume {
 pub mod softmixer;
 use self::softmixer::SoftMixer;
 
+pub mod externalmixer;
+use self::externalmixer::ExternalMixer;
+
 #[cfg(feature = "alsa-backend")]
 pub mod alsamixer;
 #[cfg(feature = "alsa-backend")]
@@ -62,6 +65,7 @@ fn mk_sink<M: Mixer + 'static>(config: MixerConfig) -> Box<dyn Mixer> {
 }
 
 pub const MIXERS: &[(&str, MixerFn)] = &[
+    (ExternalMixer::NAME, mk_sink::<ExternalMixer>),
     (SoftMixer::NAME, mk_sink::<SoftMixer>), // default goes first
     #[cfg(feature = "alsa-backend")]
     (AlsaMixer::NAME, mk_sink::<AlsaMixer>),

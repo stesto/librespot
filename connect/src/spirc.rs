@@ -6,10 +6,15 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use std::net::TcpStream;
-use std::io::Write;
-use std::time::Duration;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+// use std::net::TcpStream;
+// use std::io::Write;
+// use std::time::Duration;
+// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+use tokio::{
+    io::{AsyncWriteExt},
+    net::{TcpListener}
+};
 
 use futures_util::{
     future::{self, FusedFuture},
@@ -114,6 +119,8 @@ struct SpircTask {
     context: Option<StationContext>,
 
     spirc_id: usize,
+
+    external_api_tcp_listener: TcpListener,
 }
 
 static SPIRC_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -381,6 +388,8 @@ impl Spirc {
             context: None,
 
             spirc_id,
+
+            external_api_tcp_listener: TcpListener::bind("127.0.0.1:55551").await?,
         };
 
         if let Some(volume) = initial_volume {
@@ -530,6 +539,24 @@ impl SpircTask {
                         Err(err) => {
                             error!("AutoplayError: {:?}", err)
                         }
+                    }
+                },
+                tcp_connection = self.external_api_tcp_listener.accept() => {
+                    match tcp_connection {
+                        Ok((mut stream, _)) => {
+                            let _ = stream.readable().await;
+
+                            let mut buf = [0;512];
+                            match stream.try_read(&mut buf) {
+                                Ok(0) | Err(_) => {},
+                                Ok(n) => {
+                                    self.handle_external_api_command(buf, n);
+                                }
+                            }
+
+                            let _ = stream.shutdown().await;
+                        }, 
+                        Err(e) => warn!("[extAPI] could not connect client: {:?}", e),
                     }
                 },
                 else => break
@@ -1428,18 +1455,26 @@ impl SpircTask {
 
     fn set_volume(&mut self, volume: u16) {
         self.device.set_volume(volume as u32);
-        self.mixer.set_volume(u16::MAX); //don't pass actual volume to mixer
-        ///////////////////////////////
-        let vol = (volume as f64 / 65535.0 * 255.0) as u8; // shrink to byte
-        let ip = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 55550);
-        if let Ok(mut stream) = TcpStream::connect_timeout(&ip, Duration::from_millis(750)) {
-            let _ = stream.write(&[vol]);
-        }
-        ///////////////////////////////
+        self.mixer.set_volume(volume);
         if let Some(cache) = self.session.cache() {
             cache.save_volume(volume)
         }
         self.player.emit_volume_set_event(volume);
+    }
+
+    fn handle_external_api_command(&mut self, buffer: [u8; 512], size: usize) {
+        // Volume changed externally, notify clients
+        if buffer[0] == 0 && size == 2 { 
+            let vol: u16 = u16::MAX / (u8::MAX as u16) * (buffer[1] as u16);
+            debug!("[extAPI] volume changed externally: {:?}", vol);
+
+            self.device.set_volume(vol as u32);
+            if let Some(cache) = self.session.cache() {
+                cache.save_volume(vol)
+            }
+
+            let _ = self.notify(None);
+        }
     }
 }
 
