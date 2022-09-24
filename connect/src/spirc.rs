@@ -1564,18 +1564,38 @@ impl SpircTask {
     }
 
     fn handle_external_api_command(&mut self, buffer: [u8; 512], size: usize) {
-        // Volume changed externally, notify clients
-        if buffer[0] == 0 && size == 2 { 
-            let vol: u16 = u16::MAX / (u8::MAX as u16) * (buffer[1] as u16);
-            debug!("[extAPI] volume changed externally: {:?}", vol);
+        match buffer[0] {
+            // Volume changed externally, notify clients
+            0 if size == 2 => {
+                let vol: u16 = u16::MAX / (u8::MAX as u16) * (buffer[1] as u16);
 
-            self.device.set_volume(vol as u32);
-            if let Some(cache) = self.session.cache() {
-                cache.save_volume(vol)
-            }
-
-            let _ = self.notify(None);
+                self.device.set_volume(vol as u32);
+                if let Some(cache) = self.session.cache() {
+                    cache.save_volume(vol)
+                }
+            },
+            // play pause
+            1 if size == 2 => {
+                match buffer[1] {
+                    0 => self.handle_play_pause(),
+                    1 => self.handle_play(),
+                    2 => self.handle_pause(),
+                    _ => {}
+                }
+            },
+            // skip prev
+            2 if size == 2 => {
+                match buffer[1] {
+                    0 => self.handle_next(),
+                    1 => self.handle_prev(),
+                    _ => {}
+                }
+            },
+            _ => {}
         }
+
+        let _ = self.notify(None);
+
     }
 }
 
