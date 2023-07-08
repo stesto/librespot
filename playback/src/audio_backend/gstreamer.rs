@@ -27,7 +27,7 @@ pub struct GstreamerSink {
 
 impl Open for GstreamerSink {
     fn open(device: Option<String>, format: AudioFormat) -> Self {
-        info!("Using GStreamer sink with format: {:?}", format);
+        info!("Using GStreamer sink with format: {format:?}");
         gst::init().expect("failed to init GStreamer!");
 
         let gst_format = match format {
@@ -48,7 +48,8 @@ impl Open for GstreamerSink {
         let gst_bytes = NUM_CHANNELS as usize * 2048 * sample_size;
 
         let pipeline = gst::Pipeline::new(None);
-        let appsrc = gst::ElementFactory::make("appsrc", None)
+        let appsrc = gst::ElementFactory::make("appsrc")
+            .build()
             .expect("Failed to create GStreamer appsrc element")
             .downcast::<gst_app::AppSrc>()
             .expect("couldn't cast AppSrc element at runtime!");
