@@ -24,10 +24,7 @@ use symphonia::core::io::MediaSource;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    audio::{
-        AudioDecrypt, AudioFile, StreamLoaderController, READ_AHEAD_BEFORE_PLAYBACK,
-        READ_AHEAD_DURING_PLAYBACK,
-    },
+    audio::{AudioDecrypt, AudioFetchParams, AudioFile, StreamLoaderController},
     audio_backend::Sink,
     config::{Bitrate, NormalisationMethod, NormalisationType, PlayerConfig},
     convert::Converter,
@@ -386,7 +383,7 @@ impl NormalisationData {
                 let limiting_db = factor_db + config.normalisation_threshold_dbfs.abs();
 
                 warn!(
-                    "This track may exceed dBFS by {:.2} dB and be subject to {:.2} dB of dynamic limiting at it's peak.",
+                    "This track may exceed dBFS by {:.2} dB and be subject to {:.2} dB of dynamic limiting at its peak.",
                     factor_db, limiting_db
                 );
             } else if factor > threshold_ratio {
@@ -395,7 +392,7 @@ impl NormalisationData {
                     + config.normalisation_threshold_dbfs.abs();
 
                 info!(
-                    "This track may be subject to {:.2} dB of dynamic limiting at it's peak.",
+                    "This track may be subject to {:.2} dB of dynamic limiting at its peak.",
                     limiting_db
                 );
             }
@@ -1910,10 +1907,6 @@ impl PlayerInternal {
             }
         }
 
-        // We need to load the track - either from scratch or by completing a preload.
-        // In any case we go into a Loading state to load the track.
-        self.ensure_sink_stopped(play);
-
         self.send_event(PlayerEvent::Loading {
             track_id,
             play_request_id,
@@ -2227,13 +2220,14 @@ impl PlayerInternal {
             ..
         } = self.state
         {
+            let read_ahead_during_playback = AudioFetchParams::get().read_ahead_during_playback;
             // Request our read ahead range
             let request_data_length =
-                (READ_AHEAD_DURING_PLAYBACK.as_secs_f32() * bytes_per_second as f32) as usize;
+                (read_ahead_during_playback.as_secs_f32() * bytes_per_second as f32) as usize;
 
             // Request the part we want to wait for blocking. This effectively means we wait for the previous request to partially complete.
             let wait_for_data_length =
-                (READ_AHEAD_BEFORE_PLAYBACK.as_secs_f32() * bytes_per_second as f32) as usize;
+                (read_ahead_during_playback.as_secs_f32() * bytes_per_second as f32) as usize;
 
             stream_loader_controller
                 .fetch_next_and_wait(request_data_length, wait_for_data_length)
