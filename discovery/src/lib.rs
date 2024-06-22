@@ -84,6 +84,7 @@ impl Builder {
             server_config: server::Config {
                 name: "Librespot".into(),
                 device_type: DeviceType::default(),
+                is_group: false,
                 device_id: device_id.into(),
                 client_id: client_id.into(),
             },
@@ -101,6 +102,12 @@ impl Builder {
     /// Sets the device type which is visible as icon in other Spotify clients. Default is `Speaker`.
     pub fn device_type(mut self, device_type: DeviceType) -> Self {
         self.server_config.device_type = device_type;
+        self
+    }
+
+    /// Sets whether the device is a group. This affects the icon in Spotify clients. Default is `false`.
+    pub fn is_group(mut self, is_group: bool) -> Self {
+        self.server_config.is_group = is_group;
         self
     }
 
@@ -124,7 +131,7 @@ impl Builder {
     pub fn launch(self) -> Result<Discovery, Error> {
         let mut port = self.port;
         let name = self.server_config.name.clone().into_owned();
-        let server = DiscoveryServer::new(self.server_config, &mut port)??;
+        let server = DiscoveryServer::new(self.server_config, &mut port)?;
         let _zeroconf_ip = self.zeroconf_ip;
         let svc;
 

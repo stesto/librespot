@@ -1,5 +1,4 @@
 use std::{
-    convert::TryFrom,
     future::Future,
     pin::Pin,
     sync::atomic::{AtomicUsize, Ordering},
@@ -14,7 +13,7 @@ use futures_util::{
     FutureExt, StreamExt,
 };
 
-use protobuf::{self, Message};
+use protobuf::Message;
 use rand::prelude::SliceRandom;
 use thiserror::Error;
 use tokio::sync::mpsc;
