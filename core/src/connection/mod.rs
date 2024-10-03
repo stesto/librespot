@@ -3,7 +3,7 @@ mod handshake;
 
 pub use self::{codec::ApCodec, handshake::handshake};
 
-use std::io;
+use std::{io, time::Duration};
 
 use futures_util::{SinkExt, StreamExt};
 use num_traits::FromPrimitive;
@@ -63,9 +63,33 @@ impl From<APLoginFailed> for AuthenticationError {
 }
 
 pub async fn connect(host: &str, port: u16, proxy: Option<&Url>) -> io::Result<Transport> {
-    let socket = crate::socket::connect(host, port, proxy).await?;
+    const TIMEOUT: Duration = Duration::from_secs(3);
+    let socket = tokio::time::timeout(TIMEOUT, crate::socket::connect(host, port, proxy)).await??;
 
     handshake(socket).await
+}
+
+pub async fn connect_with_retry(
+    host: &str,
+    port: u16,
+    proxy: Option<&Url>,
+    max_retries: u8,
+) -> io::Result<Transport> {
+    let mut num_retries = 0;
+    loop {
+        match connect(host, port, proxy).await {
+            Ok(f) => return Ok(f),
+            Err(e) => {
+                debug!("Connection failed: {e}");
+                if num_retries < max_retries {
+                    num_retries += 1;
+                    debug!("Retry access point...");
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
 }
 
 pub async fn authenticate(
@@ -99,10 +123,12 @@ pub async fn authenticate(
     };
 
     let mut packet = ClientResponseEncrypted::new();
-    packet
-        .login_credentials
-        .mut_or_insert_default()
-        .set_username(credentials.username);
+    if let Some(username) = credentials.username {
+        packet
+            .login_credentials
+            .mut_or_insert_default()
+            .set_username(username);
+    }
     packet
         .login_credentials
         .mut_or_insert_default()
@@ -133,6 +159,7 @@ pub async fn authenticate(
     let cmd = PacketType::Login;
     let data = packet.write_to_bytes()?;
 
+    debug!("Authenticating with AP using {:?}", credentials.auth_type);
     transport.send((cmd as u8, data)).await?;
     let (cmd, data) = transport
         .next()
@@ -144,7 +171,7 @@ pub async fn authenticate(
             let welcome_data = APWelcome::parse_from_bytes(data.as_ref())?;
 
             let reusable_credentials = Credentials {
-                username: welcome_data.canonical_username().to_owned(),
+                username: Some(welcome_data.canonical_username().to_owned()),
                 auth_type: welcome_data.reusable_auth_credentials_type(),
                 auth_data: welcome_data.reusable_auth_credentials().to_owned(),
             };
