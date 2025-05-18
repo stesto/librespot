@@ -901,8 +901,8 @@ fn get_setup() -> Setup {
             MIXER_TYPE,
             MIXER_TYPE_SHORT,
             &opt_str(MIXER_TYPE).unwrap_or_default(),
-            "alsa, softvol",
-            "softvol",
+            "external, alsa, softvol",
+            "external",
         );
 
         exit(1);

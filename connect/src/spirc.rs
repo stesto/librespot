@@ -40,7 +40,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{io::AsyncWriteExt, net::TcpListener, sync::mpsc, time::sleep};
 
 #[derive(Debug, Error)]
 enum SpircError {
@@ -107,6 +107,8 @@ struct SpircTask {
     update_state: bool,
 
     spirc_id: usize,
+    
+    external_api_tcp_listener: TcpListener,
 }
 
 static SPIRC_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -251,6 +253,8 @@ impl Spirc {
             update_state: false,
 
             spirc_id,
+
+            external_api_tcp_listener: TcpListener::bind("127.0.0.1:55551").await?
         };
 
         let spirc = Spirc { commands: cmd_tx };
@@ -539,6 +543,24 @@ impl SpircTask {
                         if let Err(why) = self.notify().await {
                             error!("update after context resolving failed: {why}")
                         }
+                    }
+                },
+                tcp = async { self.external_api_tcp_listener.accept().await } => {
+                    match tcp {
+                        Ok((mut stream, _)) => {
+                            let _ = stream.readable().await;
+
+                            let mut buf = [0;512];
+                            match stream.try_read(&mut buf) {
+                                Ok(0) | Err(_) => {},
+                                Ok(n) => {
+                                    self.handle_external_api_command(buf, n).await;
+                                }
+                            }
+
+                            let _ = stream.shutdown().await;
+                        }, 
+                        Err(e) => warn!("[ext_api] could not connect client: {:?}", e),
                     }
                 },
                 else => break
@@ -1547,7 +1569,9 @@ impl SpircTask {
     }
 
     fn handle_next(&mut self, track_uri: Option<String>) -> Result<(), Error> {
-        let continue_playing = self.connect_state.is_playing();
+        // let continue_playing = self.connect_state.is_playing();
+        // the regular player always starts/resumes playback
+        let continue_playing = true;
 
         let current_uri = self.connect_state.current_track(|t| &t.uri);
         let mut has_next_track =
@@ -1581,6 +1605,8 @@ impl SpircTask {
         // Under 3s it goes to the previous song (starts playing)
         // Over 3s it seeks to zero (retains previous play status)
         if self.position() < 3000 {
+            // the regular player always starts/resumes playback
+            let continue_playing = true;
             let repeat_context = self.connect_state.repeat_context();
             match self.connect_state.prev_track()? {
                 None if repeat_context => self.connect_state.reset_playback_to_position(None)?,
@@ -1588,7 +1614,7 @@ impl SpircTask {
                     self.connect_state.reset_playback_to_position(None)?;
                     self.handle_stop()
                 }
-                Some(_) => self.load_track(self.connect_state.is_playing(), 0)?,
+                Some(_) => self.load_track(continue_playing, 0)?,
             }
         } else {
             self.handle_seek(0);
@@ -1749,12 +1775,34 @@ impl SpircTask {
 
             self.connect_state.set_volume(new_volume);
             self.mixer.set_volume(volume);
+                
             if let Some(cache) = self.session.cache() {
                 cache.save_volume(volume)
             }
             if self.connect_state.is_active() {
                 self.player.emit_volume_changed_event(volume);
             }
+        }
+    }
+
+    async fn handle_external_api_command(&mut self, buffer: [u8; 512], size: usize) {
+        match buffer[0] {
+            // Volume changed externally, notify clients
+            0 if size == 2 => {
+                let vol: u16 = u16::MAX / (u8::MAX as u16) * (buffer[1] as u16);
+
+                self.update_volume = true;
+                self.connect_state.set_volume(vol as u32);
+                if let Some(cache) = self.session.cache() {
+                    cache.save_volume(vol)
+                }
+            },
+            1 => { let _ = self.handle_command(SpircCommand::PlayPause).await; },
+            2 => { let _ = self.handle_command(SpircCommand::Play).await; },
+            3 => { let _ = self.handle_command(SpircCommand::Pause).await; },
+            4 => { let _ = self.handle_command(SpircCommand::Next).await; },
+            5 => { let _ = self.handle_command(SpircCommand::Prev).await; },
+            _ => {}
         }
     }
 }
