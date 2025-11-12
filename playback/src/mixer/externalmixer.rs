@@ -1,5 +1,7 @@
 use std::{io::{Read, Write}, net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream}, time::Duration};
 
+use librespot_core::Error;
+
 use super::{Mixer, MixerConfig};
 
 #[derive(Clone)]
@@ -12,8 +14,8 @@ pub struct ExternalMixer {
 }
 
 impl Mixer for ExternalMixer {
-    fn open(_: MixerConfig) -> Self {
-        Self {
+    fn open(_: MixerConfig) -> Result<Self, Error> {
+        Ok(Self {
             ip: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 55550),
             
             timeout: Duration::from_millis(100),
@@ -27,7 +29,7 @@ impl Mixer for ExternalMixer {
                 1, // set volume
                 0  // placeholder for volume value
             ]
-        }
+        })
     }
 
     fn volume(&self) -> u16 {
