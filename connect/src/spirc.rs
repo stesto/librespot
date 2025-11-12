@@ -109,7 +109,7 @@ struct SpircTask {
     update_state: bool,
 
     spirc_id: usize,
-    
+
     external_api_tcp_listener: TcpListener,
 }
 
@@ -258,7 +258,7 @@ impl Spirc {
 
             spirc_id,
 
-            external_api_tcp_listener: TcpListener::bind("127.0.0.1:55551").await?
+            external_api_tcp_listener: TcpListener::bind("127.0.0.1:55551").await?,
         };
 
         let spirc = Spirc { commands: cmd_tx };
@@ -578,7 +578,7 @@ impl SpircTask {
                             }
 
                             let _ = stream.shutdown().await;
-                        }, 
+                        },
                         Err(e) => warn!("[ext_api] could not connect client: {:?}", e),
                     }
                 },
@@ -1839,7 +1839,7 @@ impl SpircTask {
 
             self.connect_state.set_volume(new_volume);
             self.mixer.set_volume(volume);
-                
+
             if let Some(cache) = self.session.cache() {
                 cache.save_volume(volume)
             }
@@ -1860,12 +1860,22 @@ impl SpircTask {
                 if let Some(cache) = self.session.cache() {
                     cache.save_volume(vol)
                 }
-            },
-            1 => { let _ = self.handle_command(SpircCommand::PlayPause).await; },
-            2 => { let _ = self.handle_command(SpircCommand::Play).await; },
-            3 => { let _ = self.handle_command(SpircCommand::Pause).await; },
-            4 => { let _ = self.handle_command(SpircCommand::Next).await; },
-            5 => { let _ = self.handle_command(SpircCommand::Prev).await; },
+            }
+            1 => {
+                let _ = self.handle_command(SpircCommand::PlayPause).await;
+            }
+            2 => {
+                let _ = self.handle_command(SpircCommand::Play).await;
+            }
+            3 => {
+                let _ = self.handle_command(SpircCommand::Pause).await;
+            }
+            4 => {
+                let _ = self.handle_command(SpircCommand::Next).await;
+            }
+            5 => {
+                let _ = self.handle_command(SpircCommand::Prev).await;
+            }
             _ => {}
         }
     }
