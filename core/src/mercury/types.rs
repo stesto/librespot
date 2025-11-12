@@ -4,7 +4,7 @@ use byteorder::{BigEndian, WriteBytesExt};
 use protobuf::Message;
 use thiserror::Error;
 
-use crate::{packet::PacketType, protocol, Error};
+use crate::{Error, packet::PacketType, protocol};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MercuryMethod {
@@ -57,7 +57,7 @@ impl std::fmt::Display for MercuryMethod {
             MercuryMethod::Unsub => "UNSUB",
             MercuryMethod::Send => "SEND",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 

@@ -1,7 +1,7 @@
 use librespot::{
     connect::{ConnectConfig, LoadRequest, LoadRequestOptions, Spirc},
     core::{
-        authentication::Credentials, cache::Cache, config::SessionConfig, session::Session, Error,
+        Error, authentication::Credentials, cache::Cache, config::SessionConfig, session::Session,
     },
     playback::mixer::MixerConfig,
     playback::{
@@ -50,7 +50,7 @@ async fn main() -> Result<(), Error> {
         })?;
 
     let session = Session::new(session_config, Some(cache));
-    let mixer = mixer_builder(mixer_config);
+    let mixer = mixer_builder(mixer_config)?;
 
     let player = Player::new(
         player_config,

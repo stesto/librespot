@@ -3,11 +3,14 @@ use crate::player::{db_to_ratio, ratio_to_db};
 use super::mappings::{LogMapping, MappedCtrl, VolumeMapping};
 use super::{Mixer, MixerConfig, VolumeCtrl};
 
+use alsa::Error as AlsaError;
 use alsa::ctl::{ElemId, ElemIface};
 use alsa::mixer::{MilliBel, SelemChannelId, SelemId};
 use alsa::{Ctl, Round};
 
-use std::ffi::CString;
+use librespot_core::Error;
+use std::ffi::{CString, NulError};
+use thiserror::Error;
 
 #[derive(Clone)]
 #[allow(dead_code)]
@@ -29,8 +32,30 @@ pub struct AlsaMixer {
 const SND_CTL_TLV_DB_GAIN_MUTE: MilliBel = MilliBel(-9999999);
 const ZERO_DB: MilliBel = MilliBel(0);
 
+#[derive(Debug, Error)]
+enum AlsaMixerError {
+    #[error("Could not open Alsa mixer. {0}")]
+    CouldNotOpen(AlsaError),
+    #[error("Could not find Alsa mixer control")]
+    CouldNotFindController,
+    #[error("Could not open Alsa softvol with that device. {0}")]
+    CouldNotOpenWithDevice(AlsaError),
+    #[error("Could not open Alsa softvol with that name. {0}")]
+    CouldNotOpenWithName(NulError),
+    #[error("Could not get Alsa softvol dB range. {0}")]
+    NoDbRange(AlsaError),
+    #[error("Could not convert Alsa raw volume to dB volume. {0}")]
+    CouldNotConvertRaw(AlsaError),
+}
+
+impl From<AlsaMixerError> for Error {
+    fn from(value: AlsaMixerError) -> Self {
+        Error::failed_precondition(value)
+    }
+}
+
 impl Mixer for AlsaMixer {
-    fn open(config: MixerConfig) -> Self {
+    fn open(config: MixerConfig) -> Result<Self, Error> {
         info!(
             "Mixing with Alsa and volume control: {:?} for device: {} with mixer control: {},{}",
             config.volume_ctrl, config.device, config.control, config.index,
@@ -39,10 +64,10 @@ impl Mixer for AlsaMixer {
         let mut config = config; // clone
 
         let mixer =
-            alsa::mixer::Mixer::new(&config.device, false).expect("Could not open Alsa mixer");
+            alsa::mixer::Mixer::new(&config.device, false).map_err(AlsaMixerError::CouldNotOpen)?;
         let simple_element = mixer
             .find_selem(&SelemId::new(&config.control, config.index))
-            .expect("Could not find Alsa mixer control");
+            .ok_or(AlsaMixerError::CouldNotFindController)?;
 
         // Query capabilities
         let has_switch = simple_element.has_playback_switch();
@@ -57,17 +82,17 @@ impl Mixer for AlsaMixer {
         // Query dB volume range -- note that Alsa exposes a different
         // API for hardware and software mixers
         let (min_millibel, max_millibel) = if is_softvol {
-            let control = Ctl::new(&config.device, false)
-                .expect("Could not open Alsa softvol with that device");
+            let control =
+                Ctl::new(&config.device, false).map_err(AlsaMixerError::CouldNotOpenWithDevice)?;
             let mut element_id = ElemId::new(ElemIface::Mixer);
             element_id.set_name(
                 &CString::new(config.control.as_str())
-                    .expect("Could not open Alsa softvol with that name"),
+                    .map_err(AlsaMixerError::CouldNotOpenWithName)?,
             );
             element_id.set_index(config.index);
             let (min_millibel, mut max_millibel) = control
                 .get_db_range(&element_id)
-                .expect("Could not get Alsa softvol dB range");
+                .map_err(AlsaMixerError::NoDbRange)?;
 
             // Alsa can report incorrect maximum volumes due to rounding
             // errors. e.g. Alsa rounds [-60.0..0.0] in range [0..255] to
@@ -81,7 +106,11 @@ impl Mixer for AlsaMixer {
                 let reported_step_size = (max_millibel - min_millibel).0 / range;
                 let assumed_step_size = (ZERO_DB - min_millibel).0 / range;
                 if reported_step_size == assumed_step_size {
-                    warn!("Alsa rounding error detected, setting maximum dB to {:.2} instead of {:.2}", ZERO_DB.to_db(), max_millibel.to_db());
+                    warn!(
+                        "Alsa rounding error detected, setting maximum dB to {:.2} instead of {:.2}",
+                        ZERO_DB.to_db(),
+                        max_millibel.to_db()
+                    );
                     max_millibel = ZERO_DB;
                 } else {
                     warn!("Please manually set `--volume-range` if this is incorrect");
@@ -97,7 +126,7 @@ impl Mixer for AlsaMixer {
                 debug!("Alsa mixer reported minimum dB as mute, trying workaround");
                 min_millibel = simple_element
                     .ask_playback_vol_db(min + 1)
-                    .expect("Could not convert Alsa raw volume to dB volume");
+                    .map_err(AlsaMixerError::CouldNotConvertRaw)?;
             }
             (min_millibel, max_millibel)
         };
@@ -150,7 +179,7 @@ impl Mixer for AlsaMixer {
         );
         debug!("Alsa forcing linear dB mapping: {}", use_linear_in_db);
 
-        Self {
+        Ok(Self {
             config,
             min,
             max,
@@ -161,7 +190,7 @@ impl Mixer for AlsaMixer {
             has_switch,
             is_softvol,
             use_linear_in_db,
-        }
+        })
     }
 
     fn volume(&self) -> u16 {
